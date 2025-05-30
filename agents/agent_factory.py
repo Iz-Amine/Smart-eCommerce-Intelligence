@@ -16,12 +16,12 @@ import sys
 # Add the project root to the sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from scrapping.agents.BaseA2AAgent import BaseA2AAgent
-from scrapping.agents.ShopifyAgent import ShopifyAgent
-from scrapping.agents.WooCommerceAgent import WooCommerceAgent
-from scrapping.agents.DB.db import SessionLocal
-from scrapping.agents.DB.models import Store, Product, ScrapingLog
-from scrapping.agents.DB.db_utils import get_or_create_store, add_or_update_product
+from .BaseA2AAgent import BaseA2AAgent
+from .ShopifyAgent import ShopifyAgent
+from .WooCommerceAgent import WooCommerceAgent
+from DB.db import SessionLocal
+from DB.models import Store, Product, ScrapingLog
+from DB.db_utils import get_or_create_store, add_or_update_product
 
 # Configure logging
 logging.basicConfig(
