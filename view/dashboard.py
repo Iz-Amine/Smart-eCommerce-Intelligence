@@ -613,7 +613,7 @@ def show_product_gallery():
                     st.divider()
 
 def show_dashboard():
-    st.title("Shopify Analytics Dashboard")
+    st.title("E-Commerce Analytics Dashboard")
     
     # Load data
     logs_df, products_df, stores_df = load_data()
@@ -1004,7 +1004,7 @@ def main():
         st.session_state['selected_product'] = None
     
     # Sidebar navigation
-    st.sidebar.title("🛍️ Shopify Analyzer")
+    st.sidebar.title("🛍️ E-Commerce Analyzer")
     st.sidebar.markdown("---")
     
     # MODIFICATION ICI : Ajouter "MCP Dashboard" à la liste

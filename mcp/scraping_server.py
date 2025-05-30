@@ -1,183 +1,209 @@
 from typing import Any, Dict, List
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from mcp.mcp_base import MCPServer, MCPRequest
-from scrapping.agents.agent_factory import EnhancedAgentFactory
+from agents.ShopifyAgent import ShopifyAgent
 
 class ScrapingServer(MCPServer):
-    """MCP Server for responsible scraping operations."""
+    """MCP Server simple pour les opérations de scraping."""
     
     def __init__(self, name: str, host: Any):
-        # Définir les permissions par client
+        # Permissions complètes pour tous les clients
         permissions = {
-            "dashboard": ["scrape_store", "get_scraping_status"],
-            "scheduler": ["scrape_store", "batch_scrape", "get_scraping_status"],
-            "admin": ["scrape_store", "batch_scrape", "get_scraping_status", "update_limits"],
-            "llm_enricher": ["get_scraping_status"]  # LLM ne peut que consulter
+            "dashboard": ["scrape_store", "batch_scrape", "get_status"],
+            "admin": ["scrape_store", "batch_scrape", "get_status"],
+            "llm_enricher": ["scrape_store", "batch_scrape", "get_status"],
+            "scheduler": ["scrape_store", "batch_scrape", "get_status"]
         }
         super().__init__(name, host, permissions)
         
-        # Limites de scraping responsable
-        self.rate_limits = {
-            "requests_per_minute": 30,
-            "max_concurrent_sites": 3,
-            "min_delay_between_requests": 2.0,
-            "max_products_per_session": 500
-        }
-        
-        # Historique des requêtes pour rate limiting
-        self.request_history = []
-        self.active_scraping_sessions = {}
+        # Historique simple
+        self.scraping_history = []
     
     def _process_request(self, request: MCPRequest) -> Any:
-        """Process scraping-related requests with responsibility checks."""
+        """Process scraping requests."""
         
-        # Log toutes les intentions de scraping
-        self.logger.info(f"Scraping request from {request.source}: {request.action}")
+        self.logger.info(f"Scraping request: {request.action} from {request.source}")
         
         if request.action == "scrape_store":
-            return self._responsible_scrape_store(request)
+            return self._scrape_store(request)
         elif request.action == "batch_scrape":
-            return self._responsible_batch_scrape(request)
-        elif request.action == "get_scraping_status":
-            return self._get_scraping_status(request)
-        elif request.action == "update_limits":
-            return self._update_rate_limits(request)
+            return self._batch_scrape(request)
+        elif request.action == "get_status":
+            return self._get_status()
         else:
-            raise ValueError(f"Unknown action: {request.action}")
+            raise ValueError(f"Action inconnue: {request.action}")
     
-    def _responsible_scrape_store(self, request: MCPRequest) -> Dict[str, Any]:
-        """Scrape with ethical and rate limiting checks."""
+    def _scrape_store(self, request: MCPRequest) -> Dict[str, Any]:
+        """Scraper un seul site avec ShopifyAgent."""
         url = request.parameters.get("url")
-        limit = min(request.parameters.get("limit", 100), self.rate_limits["max_products_per_session"])
-        
-        # Vérifications responsables
-        if not self._check_rate_limits(request.source):
-            raise Exception("Rate limit exceeded. Please wait before making new requests.")
-        
-        if not self._check_robots_txt(url):
-            self.logger.warning(f"robots.txt disallows scraping for {url}")
-            return {
-                "success": False,
-                "error": "robots.txt disallows scraping",
-                "recommendation": "Contact site owner for API access"
-            }
-        
-        # Déclarer les intentions
-        scraping_context = {
-            "purpose": request.context.get("purpose", "educational_research"),
-            "requester": request.source,
-            "timestamp": datetime.now().isoformat(),
-            "rate_limited": True,
-            "data_usage": "analytics_only"
-        }
+        limit = request.parameters.get("limit", 100)
+        category = request.parameters.get("category")
         
         try:
-            # Utiliser la factory avec des paramètres responsables
-            result = EnhancedAgentFactory.scrape_single_site(
-                site_url=url,
-                limit=limit,
-                with_variants=False,  # Limiter les données collectées
-                **request.parameters
-            )
+            # Créer directement un ShopifyAgent
+            agent = ShopifyAgent(site_url=url, category=category)
             
-            # Enregistrer la session
-            self._log_scraping_session(url, result, scraping_context)
+            # Vérifier si c'est un site Shopify
+            if not agent.detect_platform():
+                return {
+                    "success": False,
+                    "error": "Site is not a Shopify store",
+                    "products_scraped": 0,
+                    "platform": "not_shopify"
+                }
+            
+            # Scraper les produits
+            start_time = datetime.now()
+            products = agent.scrape_products(limit=limit)
+            execution_time = (datetime.now() - start_time).total_seconds()
+            
+            # Préparer le résultat
+            result = {
+                "success": len(products) > 0,
+                "product_count": len(products),
+                "execution_time_seconds": execution_time,
+                "platform": "shopify",
+                "products": products
+            }
+            
+            # Log simple
+            self._log_session(url, result, request.source)
             
             return {
                 "success": result["success"],
                 "products_scraped": result["product_count"],
-                "context": scraping_context,
-                "compliance": {
-                    "rate_limited": True,
-                    "robots_txt_checked": True,
-                    "data_minimization": True
-                }
+                "execution_time": result["execution_time_seconds"],
+                "platform": result.get("platform"),
+                "products": products[:5]  # Retourner quelques produits pour preview
             }
             
         except Exception as e:
-            self.logger.error(f"Responsible scraping failed: {e}")
+            self.logger.error(f"Erreur scraping {url}: {e}")
             return {
                 "success": False,
                 "error": str(e),
-                "context": scraping_context
+                "products_scraped": 0
             }
     
-    def _check_rate_limits(self, source: str) -> bool:
-        """Vérifier les limites de taux."""
-        now = datetime.now()
-        minute_ago = now - timedelta(minutes=1)
+    def _batch_scrape(self, request: MCPRequest) -> Dict[str, Any]:
+        """Scraper plusieurs sites avec ShopifyAgent."""
+        site_configs = request.parameters.get("site_configs", [])
+        products_per_site = request.parameters.get("products_per_site", 50)
         
-        # Nettoyer l'historique ancien
-        self.request_history = [
-            req for req in self.request_history 
-            if req["timestamp"] > minute_ago
-        ]
-        
-        # Compter les requêtes récentes de cette source
-        recent_requests = [
-            req for req in self.request_history 
-            if req["source"] == source
-        ]
-        
-        return len(recent_requests) < self.rate_limits["requests_per_minute"]
-    
-    def _check_robots_txt(self, url: str) -> bool:
-        """Vérifier robots.txt (implémentation simplifiée)."""
         try:
-            import requests
-            from urllib.parse import urljoin
+            total_sites = len(site_configs)
+            successful_sites = 0
+            total_products = 0
+            start_time = datetime.now()
             
-            robots_url = urljoin(url, "/robots.txt")
-            response = requests.get(robots_url, timeout=5)
+            results = {}
             
-            if response.status_code == 200:
-                # Vérification basique - en pratique, utiliser robotparser
-                content = response.text.lower()
-                if "disallow: /" in content or "disallow: /products" in content:
-                    return False
+            for config in site_configs:
+                site_url = config.get("site_url")
+                if not site_url:
+                    continue
+                
+                try:
+                    # Créer agent pour chaque site
+                    agent = ShopifyAgent(
+                        site_url=site_url,
+                        category=config.get("category")
+                    )
+                    
+                    if agent.detect_platform():
+                        products = agent.scrape_products(limit=products_per_site)
+                        if products:
+                            successful_sites += 1
+                            total_products += len(products)
+                            results[site_url] = {
+                                "success": True,
+                                "products_count": len(products)
+                            }
+                        else:
+                            results[site_url] = {
+                                "success": False,
+                                "error": "No products found"
+                            }
+                    else:
+                        results[site_url] = {
+                            "success": False,
+                            "error": "Not a Shopify store"
+                        }
+                        
+                except Exception as e:
+                    results[site_url] = {
+                        "success": False,
+                        "error": str(e)
+                    }
             
-            return True
+            execution_time = (datetime.now() - start_time).total_seconds()
             
-        except Exception:
-            # En cas d'erreur, être conservateur
-            self.logger.warning(f"Could not check robots.txt for {url}")
-            return True
-    
-    def _log_scraping_session(self, url: str, result: Dict, context: Dict):
-        """Log détaillé de la session de scraping."""
-        session_log = {
-            "url": url,
-            "timestamp": datetime.now().isoformat(),
-            "products_scraped": result.get("product_count", 0),
-            "success": result.get("success", False),
-            "context": context,
-            "compliance_checks": {
-                "rate_limited": True,
-                "robots_txt_checked": True,
-                "data_minimized": True
+            # Préparer le résultat batch
+            result = {
+                "total_sites": total_sites,
+                "successful_sites": successful_sites,
+                "total_products": total_products,
+                "execution_time_seconds": execution_time,
+                "sites": results
             }
-        }
-        
-        # Dans un vrai système, sauvegarder en DB
-        self.logger.info(f"Scraping session logged: {session_log}")
+            
+            # Log batch
+            self._log_batch_session(result, request.source)
+            
+            return {
+                "success": True,
+                "total_sites": result["total_sites"],
+                "successful_sites": result["successful_sites"],
+                "total_products": result["total_products"],
+                "execution_time": result["execution_time_seconds"],
+                "sites_results": results
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Erreur batch scraping: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
-    def _get_scraping_status(self, request: MCPRequest) -> Dict[str, Any]:
-        """Get current scraping status and limits."""
+    def _get_status(self) -> Dict[str, Any]:
+        """Statut simple du serveur."""
         return {
-            "rate_limits": self.rate_limits,
-            "active_sessions": len(self.active_scraping_sessions),
-            "recent_requests": len(self.request_history),
-            "compliance_status": "active"
+            "server_status": "active",
+            "total_sessions": len(self.scraping_history),
+            "last_scraping": self.scraping_history[-1] if self.scraping_history else None,
+            "supported_platforms": ["shopify"],  # Seulement Shopify
+            "agent_type": "ShopifyAgent"
         }
     
-    def _update_rate_limits(self, request: MCPRequest) -> Dict[str, Any]:
-        """Update rate limiting parameters (admin only)."""
-        new_limits = request.parameters.get("limits", {})
+    def _log_session(self, url: str, result: Dict, source: str):
+        """Log simple d'une session."""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "url": url,
+            "source": source,
+            "success": result.get("success", False),
+            "products_count": result.get("product_count", 0),
+            "platform": result.get("platform", "shopify"),
+            "agent_used": "ShopifyAgent"
+        }
         
-        for key, value in new_limits.items():
-            if key in self.rate_limits:
-                self.rate_limits[key] = value
+        self.scraping_history.append(log_entry)
         
-        self.logger.info(f"Rate limits updated by {request.source}: {new_limits}")
-        return {"updated_limits": self.rate_limits}
+        # Garder seulement les 100 derniers logs
+        if len(self.scraping_history) > 100:
+            self.scraping_history = self.scraping_history[-100:]
+    
+    def _log_batch_session(self, result: Dict, source: str):
+        """Log simple d'une session batch."""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "type": "batch_scraping",
+            "source": source,
+            "total_sites": result.get("total_sites", 0),
+            "successful_sites": result.get("successful_sites", 0),
+            "total_products": result.get("total_products", 0),
+            "agent_used": "ShopifyAgent"
+        }
+        
+        self.scraping_history.append(log_entry)
