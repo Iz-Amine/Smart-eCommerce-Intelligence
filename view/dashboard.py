@@ -22,6 +22,8 @@ try:
     )
     from agents.ShopifyAgent import ShopifyAgent
     from view.analysis import add_mvp_analysis_tab
+    # Dans la section des imports
+    from compts.mcp_dashboard import show_mcp_dashboard
     from Analyse.simple_analyzer import SimpleTopKAnalyzer
     from Analyse.LLMEnricher import SimpleLLMEnricher
 except ImportError as e:
@@ -1005,10 +1007,11 @@ def main():
     st.sidebar.title("🛍️ Shopify Analyzer")
     st.sidebar.markdown("---")
     
+    # MODIFICATION ICI : Ajouter "MCP Dashboard" à la liste
     page = st.sidebar.radio(
         "📍 Navigation",
-        ["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data"],
-        index=["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data"].index(st.session_state['page']) if st.session_state['page'] in ["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data"] else 0
+        ["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data", "MCP Dashboard"],
+        index=["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data", "MCP Dashboard"].index(st.session_state['page']) if st.session_state['page'] in ["Dashboard", "Product Gallery", "Top-K Analysis", "Store Management", "Scrape Data", "MCP Dashboard"] else 0
     )
     
     # Update session state
@@ -1023,7 +1026,8 @@ def main():
         "Product Gallery": "🖼️ Browse and view detailed product information",
         "Top-K Analysis": "🏆 Find and analyze top-performing products",
         "Store Management": "🏪 Manage scraped stores and surveillance",
-        "Scrape Data": "🔄 Add new stores to scrape and monitor"
+        "Scrape Data": "🔄 Add new stores to scrape and monitor",
+        "MCP Dashboard": "🛡️ Model Context Protocol - Responsible AI interactions"  # NOUVEAU
     }
     
     st.sidebar.info(page_info.get(page, ""))
@@ -1047,6 +1051,8 @@ def main():
         show_store_management()
     elif page == "Scrape Data":
         show_scrape_data()
+    elif page == "MCP Dashboard":  # NOUVEAU
+        show_mcp_dashboard()
 
 if __name__ == "__main__":
     main()
